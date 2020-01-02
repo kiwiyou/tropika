@@ -1,0 +1,14 @@
+[package]
+name = "tropika"
+version = "0.1.0"
+publish = false
+authors = ["kiwiyou <kiwiyou@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+async-std = "1.4"
+tokio = { version = "0.2", features = ["full"] }
+telegram-bot = { git = "https://github.com/telegram-rs/telegram-bot.git" }
+log = "0.4"
+log4rs = "0.9"
+tempfile = "3.1"
