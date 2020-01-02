@@ -54,6 +54,7 @@ async fn execute_code(
         .map_err(|e| CodeError::Other(format!("Cannot create temporary file: {}", e)))?;
     let binary_path = binary.path().to_path_buf();
     let _binary = binary.into_temp_path();
+    let default_args = ["--quiet", "--overlay-tmpfs", "--private"];
     match language {
         CodeLanguage::Cpp => {
             let compiler = process::Command::new("g++")
@@ -73,7 +74,7 @@ async fn execute_code(
                 ));
             }
             let runner = process::Command::new("firejail")
-                .args(&["--private", "--quiet"])
+                .args(&default_args)
                 .arg(binary_path.as_path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -85,7 +86,7 @@ async fn execute_code(
         }
         CodeLanguage::Bash => {
             let runner = process::Command::new("firejail")
-                .args(&["--private", "--quiet"])
+                .args(&default_args)
                 .arg("bash")
                 .arg(source.path())
                 .stdin(Stdio::piped())
@@ -98,7 +99,7 @@ async fn execute_code(
         }
         CodeLanguage::Python => {
             let runner = process::Command::new("firejail")
-                .args(&["--private", "--quiet"])
+                .args(&default_args)
                 .arg("python3")
                 .arg(source.path())
                 .stdin(Stdio::piped())
@@ -111,7 +112,7 @@ async fn execute_code(
         }
         CodeLanguage::Javascript => {
             let runner = process::Command::new("firejail")
-                .args(&["--private", "--quiet"])
+                .args(&default_args)
                 .arg("node")
                 .arg(source.path())
                 .stdin(Stdio::null())
