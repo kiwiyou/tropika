@@ -9,5 +9,5 @@ RUN install_packages ca-certificates libssl-dev \
     && useradd -ms /bin/bash bot
 USER bot
 WORKDIR /home/bot
-COPY --from=build /usr/src/tropika/target/release/* ./
+COPY --from=build /usr/src/tropika/target/release/tropika /usr/src/tropika/log4rs.yml ./
 CMD ./tropika
