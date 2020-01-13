@@ -4,7 +4,7 @@ use std::sync::RwLock;
 use telegram_bot::types;
 
 #[derive(Clone)]
-enum Session {
+pub enum Session {
     Code(code::CodeSession),
 }
 
@@ -32,16 +32,14 @@ impl SessionStorage {
 }
 
 pub struct BotConfig {
-    code_timeout: u8,
+    code_api: String,
 }
 
 impl Default for BotConfig {
     fn default() -> Self {
         use std::env::var;
-        let code_timeout = var("CODE_TIMEOUT")
-            .map(|raw| raw.parse().expect("Cannot parse CODE_TIMEOUT"))
-            .unwrap_or(5);
-        Self { code_timeout }
+        let code_api = var("CODE_API").expect("CODE_API not set");
+        Self { code_api }
     }
 }
 
@@ -58,5 +56,9 @@ impl<'a> BotContext<'a> {
             session: RwLock::new(SessionStorage::new()),
             config,
         }
+    }
+
+    pub fn get_session(&self, chat: types::ChatId, message: types::MessageId) -> Option<Session> {
+        self.session.read().ok().and_then(|session| session.get(chat, message).cloned())
     }
 }

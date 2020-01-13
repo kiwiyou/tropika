@@ -1,11 +1,45 @@
 use crate::handler::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum CodeLanguage {
+    Rust,
     Cpp,
-    Bash,
     Python,
     Javascript,
+    Haskell,
+    Aheui,
+}
+
+impl CodeLanguage {
+    fn into_identifier(self) -> &'static str {
+        match self {
+            CodeLanguage::Rust => "rust",
+            CodeLanguage::Cpp => "cpp",
+            CodeLanguage::Python => "python",
+            CodeLanguage::Javascript => "javascript",
+            CodeLanguage::Haskell => "haskell",
+            CodeLanguage::Aheui => "aheui",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type")]
+enum CodeError {
+    Compile { message: String },
+    Runtime { message: String },
+    Timeout,
+    Other { message: String },
+}
+
+type CodeResult = Result<String, CodeError>;
+
+#[derive(Serialize)]
+struct CodeRequest {
+    code: String,
+    input: String,
 }
 
 #[derive(Clone)]
@@ -17,152 +51,12 @@ pub enum CodeSession {
     Reference {
         id: types::MessageId,
     },
-}
-
-enum CodeError {
-    Compile(String),
-    Runtime(String),
-    Other(String),
-    Timeout,
-}
-
-async fn execute_code(
-    language: &CodeLanguage,
-    code: &str,
-    input: &str,
-    timeout: std::time::Duration,
-) -> Result<String, CodeError> {
-    use std::process::Stdio;
-    use tempfile::*;
-    use tokio::process;
-    let mut source = NamedTempFile::new()
-        .map_err(|e| CodeError::Other(format!("Cannot create temporary file: {}", e)))?;
-    {
-        use std::io::Write;
-        let file = source.as_file_mut();
-        let mut to_write = String::new();
-        if let CodeLanguage::Javascript = language {
-            to_write.push_str("const input=\"");
-            to_write.extend(input.escape_default());
-            to_write.push_str("\";\n");
-        }
-        to_write.push_str(code);
-        file.write_all(to_write.as_ref())
-            .map_err(|e| CodeError::Other(format!("Cannot write code into file: {}", e)))?;
-    }
-    let binary = NamedTempFile::new()
-        .map_err(|e| CodeError::Other(format!("Cannot create temporary file: {}", e)))?;
-    let binary_path = binary.path().to_path_buf();
-    let _binary = binary.into_temp_path();
-    let default_args = ["--quiet", "--overlay-tmpfs", "--private"];
-    match language {
-        CodeLanguage::Cpp => {
-            let compiler = process::Command::new("g++")
-                .args(&["-x", "c++"])
-                .args(&["-o".as_ref(), binary_path.as_path()])
-                .arg(source.path())
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .map_err(|e| CodeError::Other(format!("Cannot spawn compiler process: {}", e)))?
-                .wait_with_output()
-                .await
-                .map_err(|e| CodeError::Other(format!("Error compiling source: {}", e)))?;
-            if !compiler.stderr.is_empty() {
-                return Err(CodeError::Compile(
-                    String::from_utf8_lossy(&compiler.stderr).into(),
-                ));
-            }
-            let runner = process::Command::new("firejail")
-                .args(&default_args)
-                .arg(binary_path.as_path())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| CodeError::Other(format!("Cannot spawn runner process: {}", e)))?;
-            run_binary(runner, timeout, input).await
-        }
-        CodeLanguage::Bash => {
-            let runner = process::Command::new("firejail")
-                .args(&default_args)
-                .arg("bash")
-                .arg(source.path())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| CodeError::Other(format!("Cannot spawn runner process: {}", e)))?;
-            run_binary(runner, timeout, input).await
-        }
-        CodeLanguage::Python => {
-            let runner = process::Command::new("firejail")
-                .args(&default_args)
-                .arg("python3")
-                .arg(source.path())
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| CodeError::Other(format!("Cannot spawn runner process: {}", e)))?;
-            run_binary(runner, timeout, input).await
-        }
-        CodeLanguage::Javascript => {
-            let runner = process::Command::new("firejail")
-                .args(&default_args)
-                .arg("node")
-                .arg(source.path())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| CodeError::Other(format!("Cannot spawn runner process: {}", e)))?;
-            run_binary_without_stdin(runner, timeout).await
-        }
+    Replied {
+        reply_id: types::MessageId,
     }
 }
 
-async fn run_binary(
-    mut runner: tokio::process::Child,
-    timeout: std::time::Duration,
-    input: &str,
-) -> Result<String, CodeError> {
-    if let Some(stdin) = runner.stdin() {
-        use tokio::io::AsyncWriteExt;
-        stdin
-            .write_all(input.as_ref())
-            .await
-            .map_err(|e| CodeError::Other(format!("Cannot write to stdin: {}", e)))?;
-    }
-    run_binary_without_stdin(runner, timeout).await
-}
-
-async fn run_binary_without_stdin(
-    runner: tokio::process::Child,
-    timeout: std::time::Duration,
-) -> Result<String, CodeError> {
-    let output = async_std::future::timeout(timeout, runner.wait_with_output()).await;
-    match output {
-        Err(_) => Err(CodeError::Timeout),
-        Ok(output) => {
-            let output =
-                output.map_err(|e| CodeError::Other(format!("Error running binary: {}", e)))?;
-            if !output.stderr.is_empty() {
-                Err(CodeError::Runtime(
-                    String::from_utf8_lossy(&output.stderr).trim().into(),
-                ))
-            } else {
-                Ok(String::from_utf8_lossy(&output.stdout).trim().into())
-            }
-        }
-    }
-}
-
-use log::info;
+use log::{error, info};
 use telegram_bot::*;
 pub async fn on_code_message(
     message: types::Message,
@@ -173,18 +67,27 @@ pub async fn on_code_message(
         code,
         language,
         input,
-        prev_session,
+        root_session,
+        ..
     }) = parse_code_message(&message, context)
     {
-        use std::time::Duration;
-        let run_task = execute_code(
-            &language,
-            &code,
-            &input,
-            Duration::from_secs(context.config.code_timeout as u64),
-        )
-        .await;
-        let reply = match run_task {
+        use surf::get;
+        let request_body = CodeRequest {
+            code: code.clone(),
+            input,
+        };
+        let uri = format!("{}/{}", context.config.code_api, language.into_identifier());
+        let request = get(uri).body_json(&request_body);
+        if let Err(e) = request {
+            error!("Error deserializing code request body: {}", e);
+            return Ok(());
+        }
+        let request = request.unwrap().recv_json::<CodeResult>().await;
+        if let Err(e) = request {
+            error!("Error sending code request: {}", e);
+            return Ok(());
+        }
+        let reply = match request.unwrap() {
             Ok(output) if output.is_empty() => {
                 context.api.send(message.text_reply("No output.")).await?
             }
@@ -199,7 +102,7 @@ pub async fn on_code_message(
                     .await?
             }
             Err(e) => match e {
-                CodeError::Compile(e) => {
+                CodeError::Compile { message: e } => {
                     let mut reply_task =
                         message.text_reply(format!("<b>Compile Error</b>\n<pre>{}</pre>", e));
                     context
@@ -207,14 +110,14 @@ pub async fn on_code_message(
                         .send(reply_task.parse_mode(ParseMode::Html))
                         .await
                 }
-                CodeError::Runtime(e) => {
-                    let mut reply_task = message.text_reply(format!("<b>Runtime Error</b>\n{}", e));
+                CodeError::Runtime { message: e } => {
+                    let mut reply_task = message.text_reply(format!("<b>Runtime Error</b>\n{}", e.replace("<module>", "module")));
                     context
                         .api
                         .send(reply_task.parse_mode(ParseMode::Html))
                         .await
                 }
-                CodeError::Other(e) => {
+                CodeError::Other { message: e } => {
                     let mut reply_task =
                         message.text_reply(format!("<b>Environmental Error</b>\n{}", e));
                     context
@@ -232,38 +135,132 @@ pub async fn on_code_message(
             }?,
         };
         if let Ok(mut session) = context.session.write() {
-            let new_session = match prev_session {
+            let new_session = match root_session {
                 Some(id) => CodeSession::Reference { id },
                 None => CodeSession::Real { code, language },
             };
             session.put(reply.chat.id(), reply.id, Session::Code(new_session));
+            session.put(message.chat.id(), message.id, Session::Code(CodeSession::Replied {
+                reply_id: reply.id
+            }));
         }
     }
     Ok(())
+}
+
+pub async fn on_code_update(
+    message: types::Message,
+    context: &BotContext<'_>,
+) -> Result<(), telegram_bot::Error> {
+    use types::message::*;
+    if let Some(CodeMessage {
+        code,
+        language,
+        input,
+        root_session,
+        prev_session,
+    }) = parse_code_message(&message, context)
+    {
+        if let Some(prev_session) = prev_session {
+            use surf::get;
+            let request_body = CodeRequest {
+                code: code.clone(),
+                input,
+            };
+            let uri = format!("{}/{}", context.config.code_api, language.into_identifier());
+            let request = get(uri).body_json(&request_body);
+            if let Err(e) = request {
+                error!("Error deserializing code request body: {}", e);
+                return Ok(());
+            }
+            let request = request.unwrap().recv_json::<CodeResult>().await;
+            if let Err(e) = request {
+                error!("Error sending code request: {}", e);
+                return Ok(());
+            }
+            let reply = match request.unwrap() {
+                Ok(output) if output.is_empty() => {
+                    context.api.send(EditMessageText::new(message.chat, prev_session, "No output.")).await?
+                }
+                Ok(output) => {
+                    context
+                        .api
+                        .send(
+                            EditMessageText::new(message.chat, prev_session, format!("`{}`", output))
+                                .parse_mode(ParseMode::Markdown),
+                        )
+                        .await?
+                }
+                Err(e) => match e {
+                    CodeError::Compile { message: e } => {
+                        let mut reply_task =
+                            EditMessageText::new(message.chat, prev_session, format!("<b>Compile Error</b>\n<pre>{}</pre>", e));
+                        context
+                            .api
+                            .send(reply_task.parse_mode(ParseMode::Html))
+                            .await
+                    }
+                    CodeError::Runtime { message: e } => {
+                        let mut reply_task = EditMessageText::new(message.chat, prev_session, format!("<b>Runtime Error</b>\n{}", e));
+                        context
+                            .api
+                            .send(reply_task.parse_mode(ParseMode::Html))
+                            .await
+                    }
+                    CodeError::Other { message: e } => {
+                        let mut reply_task =
+                            EditMessageText::new(message.chat, prev_session, format!("<b>Environmental Error</b>\n{}", e));
+                        context
+                            .api
+                            .send(reply_task.parse_mode(ParseMode::Html))
+                            .await
+                    }
+                    CodeError::Timeout => {
+                        let mut reply_task = EditMessageText::new(message.chat, prev_session, "_Timed out._".to_string());
+                        context
+                            .api
+                            .send(reply_task.parse_mode(ParseMode::Markdown))
+                            .await
+                    }
+                }?,
+            };
+            if let Ok(mut session) = context.session.write() {
+                let new_session = match root_session {
+                    Some(id) => CodeSession::Reference { id },
+                    None => CodeSession::Real { code, language },
+                };
+                session.put(reply.chat.id(), reply.id, Session::Code(new_session));
+            }
+            Ok(())
+        } else {
+            on_code_message(message, context).await
+        }
+    } else {
+        Ok(())
+    }
 }
 
 struct CodeMessage {
     code: String,
     language: CodeLanguage,
     input: String,
+    root_session: Option<MessageId>,
     prev_session: Option<MessageId>,
 }
 
 fn parse_code_message(message: &types::Message, context: &BotContext<'_>) -> Option<CodeMessage> {
     if let types::MessageKind::Text { ref data, .. } = message.kind {
+        let prev_session = context.get_session(message.chat.id(), message.id).and_then(|session| match session {
+            Session::Code(CodeSession::Replied {
+                reply_id
+            }) => Some(reply_id),
+            _ => None,
+        });
         if let Some(reply_to_message) = &message.reply_to_message {
             if let MessageOrChannelPost::Message(reply_to) = &**reply_to_message {
-                let session = context
-                    .session
-                    .read()
-                    .ok()
-                    .and_then(|session| session.get(reply_to.chat.id(), reply_to.id).cloned());
+                let session = context.get_session(reply_to.chat.id(), reply_to.id);
                 let code_session = match session {
-                    Some(Session::Code(CodeSession::Reference { id })) => context
-                        .session
-                        .read()
-                        .ok()
-                        .and_then(|session| session.get(reply_to.chat.id(), id).cloned())
+                    Some(Session::Code(CodeSession::Reference { id })) => context.get_session(reply_to.chat.id(), id)
                         .map(|Session::Code(s)| (s, id)),
                     Some(Session::Code(s)) => Some((s, reply_to.id)),
                     _ => None,
@@ -273,7 +270,8 @@ fn parse_code_message(message: &types::Message, context: &BotContext<'_>) -> Opt
                         code,
                         language,
                         input: data.to_owned(),
-                        prev_session: Some(real_id),
+                        root_session: Some(real_id),
+                        prev_session,
                     })
                 } else {
                     None
@@ -283,23 +281,29 @@ fn parse_code_message(message: &types::Message, context: &BotContext<'_>) -> Opt
             }
         } else {
             let mut language = None;
-            if data.starts_with("/cpp") {
+            if data.starts_with("/rust") {
+                language = Some(CodeLanguage::Rust);
+                info!("/rust from {} @ {}", message.from.id, message.chat.id());
+            } else if data.starts_with("/cpp") {
                 language = Some(CodeLanguage::Cpp);
                 info!("/cpp from {} @ {}", message.from.id, message.chat.id());
-            } else if data.starts_with("/bash") {
-                language = Some(CodeLanguage::Bash);
-                info!("/bash from {} @ {}", message.from.id, message.chat.id());
             } else if data.starts_with("/py") {
                 language = Some(CodeLanguage::Python);
                 info!("/py from {} @ {}", message.from.id, message.chat.id());
             } else if data.starts_with("/js") {
                 language = Some(CodeLanguage::Javascript);
                 info!("/js from {} @ {}", message.from.id, message.chat.id());
+            } else if data.starts_with("/hs") {
+                language = Some(CodeLanguage::Haskell);
+                info!("/hs from {} @ {}", message.from.id, message.chat.id());
+            } else if data.starts_with("/ah") {
+                language = Some(CodeLanguage::Aheui);
+                info!("/ah from {} @ {}", message.from.id, message.chat.id());
             }
 
             let code = if language.is_some() {
                 let mut args = data.splitn(2, char::is_whitespace).skip(1);
-                args.next()
+                Some(args.next().unwrap_or(""))
             } else {
                 None
             };
@@ -309,7 +313,8 @@ fn parse_code_message(message: &types::Message, context: &BotContext<'_>) -> Opt
                     code: code.to_string(),
                     language,
                     input: String::new(),
-                    prev_session: None,
+                    root_session: None,
+                    prev_session,
                 })
             } else {
                 None

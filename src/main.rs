@@ -42,6 +42,8 @@ async fn on_update(
     use types::update::*;
     if let UpdateKind::Message(message) = update.kind {
         code::on_code_message(message, context).await?;
+    } else if let UpdateKind::EditedMessage(message) = update.kind {
+        code::on_code_update(message, context).await?;
     }
     Ok(())
 }

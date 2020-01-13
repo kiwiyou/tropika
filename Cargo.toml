@@ -12,3 +12,6 @@ telegram-bot = { git = "https://github.com/telegram-rs/telegram-bot.git" }
 log = "0.4"
 log4rs = "0.9"
 tempfile = "3.1"
+serde = { version = "1.0", features = ["derive"] }
+surf = "1.0"
+lazy_static = "1.4"

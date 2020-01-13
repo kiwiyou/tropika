@@ -4,10 +4,6 @@ appenders:
     encoder:
       pattern: "[{d(%H:%M:%S)(utc)}][{h({l})}][{t}] {m}{n}"
 root:
-  level: debug
+  level: info
   appenders:
     - stdout
-loggers:
-  hyper:
-    level: error
-    additive: false 
