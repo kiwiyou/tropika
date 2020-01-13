@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 async-std = "1.4"
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "0.2", default-features = false, features = ["macros"] }
 telegram-bot = { git = "https://github.com/telegram-rs/telegram-bot.git" }
 log = "0.4"
 log4rs = "0.9"
