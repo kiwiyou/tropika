@@ -53,7 +53,7 @@ pub enum CodeSession {
     },
     Replied {
         reply_id: types::MessageId,
-    }
+    },
 }
 
 use log::{error, info};
@@ -111,7 +111,10 @@ pub async fn on_code_message(
                         .await
                 }
                 CodeError::Runtime { message: e } => {
-                    let mut reply_task = message.text_reply(format!("<b>Runtime Error</b>\n{}", e.replace("<module>", "module")));
+                    let mut reply_task = message.text_reply(format!(
+                        "<b>Runtime Error</b>\n{}",
+                        e.replace("<module>", "module")
+                    ));
                     context
                         .api
                         .send(reply_task.parse_mode(ParseMode::Html))
@@ -140,9 +143,11 @@ pub async fn on_code_message(
                 None => CodeSession::Real { code, language },
             };
             session.put(reply.chat.id(), reply.id, Session::Code(new_session));
-            session.put(message.chat.id(), message.id, Session::Code(CodeSession::Replied {
-                reply_id: reply.id
-            }));
+            session.put(
+                message.chat.id(),
+                message.id,
+                Session::Code(CodeSession::Replied { reply_id: reply.id }),
+            );
         }
     }
     Ok(())
@@ -180,43 +185,68 @@ pub async fn on_code_update(
             }
             let reply = match request.unwrap() {
                 Ok(output) if output.is_empty() => {
-                    context.api.send(EditMessageText::new(message.chat, prev_session, "No output.")).await?
+                    context
+                        .api
+                        .send(EditMessageText::new(
+                            message.chat,
+                            prev_session,
+                            "No output.",
+                        ))
+                        .await?
                 }
                 Ok(output) => {
                     context
                         .api
                         .send(
-                            EditMessageText::new(message.chat, prev_session, format!("`{}`", output))
-                                .parse_mode(ParseMode::Markdown),
+                            EditMessageText::new(
+                                message.chat,
+                                prev_session,
+                                format!("`{}`", output),
+                            )
+                            .parse_mode(ParseMode::Markdown),
                         )
                         .await?
                 }
                 Err(e) => match e {
                     CodeError::Compile { message: e } => {
-                        let mut reply_task =
-                            EditMessageText::new(message.chat, prev_session, format!("<b>Compile Error</b>\n<pre>{}</pre>", e));
+                        let mut reply_task = EditMessageText::new(
+                            message.chat,
+                            prev_session,
+                            format!("<b>Compile Error</b>\n<pre>{}</pre>", e),
+                        );
                         context
                             .api
                             .send(reply_task.parse_mode(ParseMode::Html))
                             .await
                     }
                     CodeError::Runtime { message: e } => {
-                        let mut reply_task = EditMessageText::new(message.chat, prev_session, format!("<b>Runtime Error</b>\n{}", e));
+                        let mut reply_task = EditMessageText::new(
+                            message.chat,
+                            prev_session,
+                            format!("<b>Runtime Error</b>\n{}", e),
+                        );
                         context
                             .api
                             .send(reply_task.parse_mode(ParseMode::Html))
                             .await
                     }
                     CodeError::Other { message: e } => {
-                        let mut reply_task =
-                            EditMessageText::new(message.chat, prev_session, format!("<b>Environmental Error</b>\n{}", e));
+                        let mut reply_task = EditMessageText::new(
+                            message.chat,
+                            prev_session,
+                            format!("<b>Environmental Error</b>\n{}", e),
+                        );
                         context
                             .api
                             .send(reply_task.parse_mode(ParseMode::Html))
                             .await
                     }
                     CodeError::Timeout => {
-                        let mut reply_task = EditMessageText::new(message.chat, prev_session, "_Timed out._".to_string());
+                        let mut reply_task = EditMessageText::new(
+                            message.chat,
+                            prev_session,
+                            "_Timed out._".to_string(),
+                        );
                         context
                             .api
                             .send(reply_task.parse_mode(ParseMode::Markdown))
@@ -250,17 +280,18 @@ struct CodeMessage {
 
 fn parse_code_message(message: &types::Message, context: &BotContext<'_>) -> Option<CodeMessage> {
     if let types::MessageKind::Text { ref data, .. } = message.kind {
-        let prev_session = context.get_session(message.chat.id(), message.id).and_then(|session| match session {
-            Session::Code(CodeSession::Replied {
-                reply_id
-            }) => Some(reply_id),
-            _ => None,
-        });
+        let prev_session = context
+            .get_session(message.chat.id(), message.id)
+            .and_then(|session| match session {
+                Session::Code(CodeSession::Replied { reply_id }) => Some(reply_id),
+                _ => None,
+            });
         if let Some(reply_to_message) = &message.reply_to_message {
             if let MessageOrChannelPost::Message(reply_to) = &**reply_to_message {
                 let session = context.get_session(reply_to.chat.id(), reply_to.id);
                 let code_session = match session {
-                    Some(Session::Code(CodeSession::Reference { id })) => context.get_session(reply_to.chat.id(), id)
+                    Some(Session::Code(CodeSession::Reference { id })) => context
+                        .get_session(reply_to.chat.id(), id)
                         .map(|Session::Code(s)| (s, id)),
                     Some(Session::Code(s)) => Some((s, reply_to.id)),
                     _ => None,

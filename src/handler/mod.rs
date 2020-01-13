@@ -59,6 +59,9 @@ impl<'a> BotContext<'a> {
     }
 
     pub fn get_session(&self, chat: types::ChatId, message: types::MessageId) -> Option<Session> {
-        self.session.read().ok().and_then(|session| session.get(chat, message).cloned())
+        self.session
+            .read()
+            .ok()
+            .and_then(|session| session.get(chat, message).cloned())
     }
 }
