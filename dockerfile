@@ -5,7 +5,7 @@ RUN cargo build --release
 
 FROM bitnami/minideb:latest
 
-RUN install_packages ca-certificates libssl-dev \
+RUN install_packages ca-certificates libssl-dev curl \
     && useradd -ms /bin/bash bot
 USER bot
 WORKDIR /home/bot
