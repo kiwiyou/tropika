@@ -92,6 +92,7 @@ pub async fn on_code_message(
                 context.api.send(message.text_reply("No output.")).await?
             }
             Ok(output) => {
+                let output = output.replace('`', "\'");
                 context
                     .api
                     .send(
@@ -103,6 +104,7 @@ pub async fn on_code_message(
             }
             Err(e) => match e {
                 CodeError::Compile { message: e } => {
+                    let e = e.replace(|c: char| c == '<' || c == '>', "");
                     let mut reply_task =
                         message.text_reply(format!("<b>Compile Error</b>\n<pre>{}</pre>", e));
                     context
@@ -111,9 +113,10 @@ pub async fn on_code_message(
                         .await
                 }
                 CodeError::Runtime { message: e } => {
+                    let e = e.replace(|c: char| c == '<' || c == '>', "");
                     let mut reply_task = message.text_reply(format!(
                         "<b>Runtime Error</b>\n{}",
-                        e.replace("<module>", "module")
+                        e
                     ));
                     context
                         .api
@@ -121,6 +124,7 @@ pub async fn on_code_message(
                         .await
                 }
                 CodeError::Other { message: e } => {
+                    let e = e.replace(|c: char| c == '<' || c == '>', "");
                     let mut reply_task =
                         message.text_reply(format!("<b>Environmental Error</b>\n{}", e));
                     context
@@ -195,6 +199,7 @@ pub async fn on_code_update(
                         .await?
                 }
                 Ok(output) => {
+                    let output = output.replace('`', "\'");
                     context
                         .api
                         .send(
@@ -209,6 +214,7 @@ pub async fn on_code_update(
                 }
                 Err(e) => match e {
                     CodeError::Compile { message: e } => {
+                        let e = e.replace(|c: char| c == '<' || c == '>', "");
                         let mut reply_task = EditMessageText::new(
                             message.chat,
                             prev_session,
@@ -220,6 +226,7 @@ pub async fn on_code_update(
                             .await
                     }
                     CodeError::Runtime { message: e } => {
+                        let e = e.replace(|c: char| c == '<' || c == '>', "");
                         let mut reply_task = EditMessageText::new(
                             message.chat,
                             prev_session,
@@ -231,6 +238,7 @@ pub async fn on_code_update(
                             .await
                     }
                     CodeError::Other { message: e } => {
+                        let e = e.replace(|c: char| c == '<' || c == '>', "");
                         let mut reply_task = EditMessageText::new(
                             message.chat,
                             prev_session,
